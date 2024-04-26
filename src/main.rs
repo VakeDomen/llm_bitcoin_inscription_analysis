@@ -1,5 +1,5 @@
 
-use std::{cmp::min, sync::{Arc, Mutex}, vec};
+use std::{cmp::min, fs::File, io::Write, sync::{Arc, Mutex}, vec};
 
 use candle_core::{self, Device};
 use csv::Writer;
@@ -110,10 +110,10 @@ fn main() {
 
     progress_bar.finish_with_message("Processing complete!");
 
-    if let Err(e) = save_to_csv(processed, "./data/processed_inscriptions.csv") {
+    if let Err(e) = save_to_json(processed, "./data/processed_inscriptions.json") {
         println!("Failed saving records: {:#?}", e)
     };
-    if let Err(e) = save_to_csv(failed, "./data/failed_inscriptions.csv") {
+    if let Err(e) = save_to_json(failed, "./data/failed_inscriptions.json") {
         println!("Failed saving records: {:#?}", e)
     };
 
@@ -142,5 +142,23 @@ fn save_to_csv(records: Vec<ProcessedInscription>, file_name: &str) -> Result<()
     }
     wtr.flush()?;
     println!("Saved: {} \tFailed: {}", successful_writes, failed_writes);
+    Ok(())
+}
+
+fn save_to_json(records: Vec<ProcessedInscription>, file_name: &str) -> Result<()> {
+    let file = File::create(file_name)?;
+    let mut buf_writer = std::io::BufWriter::new(file);
+    println!("Saving file: {}", file_name);
+    let progress_bar = get_progress_bar(records.len());
+
+    // Serialize the entire records vector to JSON
+    serde_json::to_writer(&mut buf_writer, &records)?;
+
+    // Flushing the buffer to ensure all data is written to the file
+    buf_writer.flush()?;
+
+    // Update progress bar after serialization
+    progress_bar.finish_with_message("File saved successfully.");
+
     Ok(())
 }
