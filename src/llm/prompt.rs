@@ -57,13 +57,13 @@ pub fn llama3_prompt(user_msg: String) -> String {
 /// # Returns
 /// A `Result` containing the generated response string or an error.
 pub fn prompt_model(
-    mut model: ModelWeights, 
-    tokenizer: Tokenizer, 
+    model: &mut ModelWeights, 
+    tokenizer: &Tokenizer, 
     prompt: Prompt, 
     device: &Device
 ) -> Result<String> {
     let mut response_chunks = vec![];
-    let mut tos = TokenOutputStream::new(tokenizer);
+    let mut tos = TokenOutputStream::new(tokenizer.clone());
    
     // Parse the prompt to a raw string format.
     let prompt_str = parse_prompt_to_raw(&prompt)?;
