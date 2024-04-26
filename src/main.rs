@@ -1,5 +1,5 @@
 
-use std::{sync::{Arc, Mutex}, vec};
+use std::{cmp::min, sync::{Arc, Mutex}, vec};
 
 use candle_core::{self, Device};
 use csv::Writer;
@@ -8,7 +8,7 @@ use anyhow::Result;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 use crate::{
-        inscriptions::loader::load_jsonl_data, llm::{
+        config::{INSCRIPTIONS_TO_PROCESS, PAR_CHUNK_SIZE}, inscriptions::loader::load_jsonl_data, llm::{
         model::load_model,
         prompt::{prompt_model, Prompt}, 
         tokenizer::load_tokenizer
@@ -57,58 +57,37 @@ fn main() {
         Err(e) => panic!("Can't load tokenizer: {:#?}", e),
     };
 
-    let mut model1 = match load_model("models/llama3-8b/Meta-Llama-3-8B-Instruct.Q5_K_M.gguf", &device1) { 
+    let model1 = match load_model("models/llama3-8b/Meta-Llama-3-8B-Instruct.Q5_K_M.gguf", &device1) { 
         Ok(m) => Arc::new(Mutex::new(m)),
         Err(e) => panic!("Can't load model: {:#?}", e),
     };
 
-    let mut model2 = match load_model("models/llama3-8b/Meta-Llama-3-8B-Instruct.Q5_K_M.gguf", &device2) { 
+    let model2 = match load_model("models/llama3-8b/Meta-Llama-3-8B-Instruct.Q5_K_M.gguf", &device2) { 
         Ok(m) => Arc::new(Mutex::new(m)),
         Err(e) => panic!("Can't load model: {:#?}", e),
     };
 
-    let mut model3 = match load_model("models/llama3-8b/Meta-Llama-3-8B-Instruct.Q5_K_M.gguf", &device1) { 
-        Ok(m) => Arc::new(Mutex::new(m)),
-        Err(e) => panic!("Can't load model: {:#?}", e),
-    };
-
-    let mut model4 = match load_model("models/llama3-8b/Meta-Llama-3-8B-Instruct.Q5_K_M.gguf", &device2) { 
-        Ok(m) => Arc::new(Mutex::new(m)),
-        Err(e) => panic!("Can't load model: {:#?}", e),
-    };
-
-    let progress_bar = get_progress_bar(inscriptions.len());
-
+    let to_process = min(INSCRIPTIONS_TO_PROCESS, inscriptions.len());
+    let progress_bar = get_progress_bar(to_process);
+    let mut done = 0;
     let mut processed: Vec<ProcessedInscription> = vec![];
     let mut failed: Vec<ProcessedInscription> = vec![];
 
-    let chunk_size = 2;
+    for batch in inscriptions.chunks(PAR_CHUNK_SIZE as usize) {
 
-    for batch in inscriptions.chunks(chunk_size) {
-
-        
         let results: Vec<Result<(String, String), (String, String)>> = batch.par_iter().enumerate().map(|(index, inscription)| {
             let prompt = Prompt::One(inscription.content.clone());
-            println!("START: {}", index);
 
             // Select the appropriate model and device based on the index
-            let (mut model, device) = match index {
+            let (mut model, device) = match index % 2 {
                 0 => (model1.lock().unwrap(), &device1),
-                1 => (model2.lock().unwrap(), &device2),
-                2 => (model3.lock().unwrap(), &device1),
-                _ => (model4.lock().unwrap(), &device2),  
+                _ => (model2.lock().unwrap(), &device2),  
             };
 
             // Process the prompt with the selected model and device
             match prompt_model(&mut *model, &tokenizer, prompt, device) {
-                Ok(out) => {
-                    println!("END: {}", index);
-                    Ok((inscription.id.clone(), out))
-                },
-                Err(e) => {
-                    println!("ERROR: {}", index);
-                    Err((inscription.id.clone(), e.to_string()))
-                }
+                Ok(out) => Ok((inscription.id.clone(), out)),
+                Err(e) => Err((inscription.id.clone(), e.to_string()))
             }
         }).collect();
 
@@ -121,7 +100,12 @@ fn main() {
                 Err((id, err)) => failed.push((id, err)),
             }
         }
-        progress_bar.inc(chunk_size as u64); 
+
+        progress_bar.inc(PAR_CHUNK_SIZE); 
+        done += PAR_CHUNK_SIZE;
+        if done >= to_process as u64 {
+            break;
+        }
     }
 
     progress_bar.finish_with_message("Processing complete!");

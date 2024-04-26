@@ -1,4 +1,6 @@
-pub const DEFAULT_PROMPT: &str = "Hello LLM!";
+pub const INSCRIPTIONS_TO_PROCESS: usize = 10;
+pub const PAR_CHUNK_SIZE: u64 = 2;
+
 pub const SYSTEM_MSG: &str = "Your task is to help us analyize bitcoin inscriptions. You will tell me a summary of the given text. And then give a list of up to 5 keywords that would describe the inscription and a language field for the language (code) of the inscription. You only respond with JSON.";
 
 pub const SEED: u64 = 42;
