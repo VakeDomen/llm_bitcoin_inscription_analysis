@@ -1,5 +1,5 @@
-use std::{fs::File, io::Read};
-
+use std::{fs::File, io::{BufWriter, Read, Write}};
+use anyhow::Result;
 use serde::{Serialize, Deserialize};
 
 use crate::config::{INSCRIPTIONS_TO_PROCESS, PAR_CHUNK_SIZE};
@@ -19,6 +19,14 @@ impl Default for Progress {
             inscriptions_to_process: INSCRIPTIONS_TO_PROCESS 
         }
     }
+}
+
+pub fn save_progress(progress: &Progress, file_path: &str) -> Result<()>{
+    let file = File::create(file_path)?;
+    let mut writer = BufWriter::new(file);
+    serde_json::to_writer(&mut writer, progress)?;
+    writer.flush()?;
+    Ok(())
 }
 
 pub fn load_progress(file_path: &str) -> Progress {

@@ -1,5 +1,5 @@
 
-use std::{cmp::min, fs::File, io::Write, sync::{Arc, Mutex}, vec};
+use std::{cmp::min, fs::{File, OpenOptions}, io::Write, sync::{Arc, Mutex}, vec};
 
 use candle_core::{self, Device};
 use csv::Writer;
@@ -8,16 +8,17 @@ use anyhow::Result;
 use rayon::iter::{IndexedParallelIterator, IntoParallelRefIterator, ParallelIterator};
 
 use crate::{
-        config::{INSCRIPTIONS_TO_PROCESS, PAR_CHUNK_SIZE}, inscriptions::loader::load_jsonl_data, llm::{
+        config::{INSCRIPTIONS_TO_PROCESS, PAR_CHUNK_SIZE, PROGRESS_FILE}, inscriptions::loader::load_jsonl_data, llm::{
         model::load_model,
         prompt::{prompt_model, Prompt}, 
         tokenizer::load_tokenizer
-    }
+    }, progress::{load_progress, save_progress, Progress}
 };
 
 mod llm;
 mod config;
 mod inscriptions;
+mod progress;
 
 type ProcessedInscription = (String, String);
 
@@ -31,7 +32,7 @@ fn main() {
     );
 
     println!("Loading inscriptions");
-    let inscriptions = match load_jsonl_data("./data/text_inscriptions.txt") {
+    let mut inscriptions = match load_jsonl_data("./data/text_inscriptions.txt") {
         Ok(i) => i,
         Err(e) => panic!("Error loading inscriptions: {:#?}", e),
     };
@@ -67,13 +68,24 @@ fn main() {
         Err(e) => panic!("Can't load model: {:#?}", e),
     };
 
-    let to_process = min(INSCRIPTIONS_TO_PROCESS, inscriptions.len());
+    let mut progress: Progress = load_progress(PROGRESS_FILE);
+
+    
+    let to_process = if let Some(bound) = progress.inscriptions_to_process {
+        min(bound, inscriptions.len())
+    } else {
+        inscriptions.len()
+    };
+
+    let mut done = progress.batches_done * progress.par_chunk_size;
     let progress_bar = get_progress_bar(to_process);
-    let mut done = 0;
+    progress_bar.inc(done); 
     let mut processed: Vec<ProcessedInscription> = vec![];
     let mut failed: Vec<ProcessedInscription> = vec![];
 
-    for batch in inscriptions.chunks(PAR_CHUNK_SIZE as usize) {
+    inscriptions.drain(0..(done as usize));
+
+    for batch in inscriptions.chunks(progress.par_chunk_size as usize) {
 
         let results: Vec<Result<(String, String), (String, String)>> = batch.par_iter().enumerate().map(|(index, inscription)| {
             let prompt = Prompt::One(inscription.content.clone());
@@ -102,7 +114,22 @@ fn main() {
         }
 
         progress_bar.inc(PAR_CHUNK_SIZE); 
-        done += PAR_CHUNK_SIZE;
+        done += progress.par_chunk_size;
+
+        progress.batches_done += 1;
+
+        if let Err(e) = save_to_json(&processed, "./data/processed_inscriptions.jsonl") {
+            println!("Failed saving records: {:#?}", e)
+        };
+        if let Err(e) = save_to_json(&failed, "./data/failed_inscriptions.jsonl") {
+            println!("Failed saving records: {:#?}", e)
+        };
+
+        if let Err(e) = save_progress(&progress, PROGRESS_FILE) {
+            println!("Failed to save progress file.");
+        }
+
+
         if done >= to_process as u64 {
             break;
         }
@@ -110,12 +137,7 @@ fn main() {
 
     progress_bar.finish_with_message("Processing complete!");
 
-    if let Err(e) = save_to_json(processed, "./data/processed_inscriptions.json") {
-        println!("Failed saving records: {:#?}", e)
-    };
-    if let Err(e) = save_to_json(failed, "./data/failed_inscriptions.json") {
-        println!("Failed saving records: {:#?}", e)
-    };
+   
 
 }
 
@@ -145,20 +167,27 @@ fn save_to_csv(records: Vec<ProcessedInscription>, file_name: &str) -> Result<()
     Ok(())
 }
 
-fn save_to_json(records: Vec<ProcessedInscription>, file_name: &str) -> Result<()> {
-    let file = File::create(file_name)?;
-    let mut buf_writer = std::io::BufWriter::new(file);
-    println!("Saving file: {}", file_name);
-    let progress_bar = get_progress_bar(records.len());
+fn save_to_json(records: &Vec<ProcessedInscription>, file_name: &str) -> Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .append(true)
+        .open(file_name)
+        .unwrap();
+    // let progress_bar = get_progress_bar(records.len());
 
-    // Serialize the entire records vector to JSON
-    serde_json::to_writer(&mut buf_writer, &records)?;
+    for record in records {
+        if let Err(e) = writeln!(file, "{:?}", serde_json::to_string(record)) {
+            eprintln!("Couldn't write to file: {}", e);
+        }
+    }
+    // println!("Saving file: {}", file_name);
+    
 
-    // Flushing the buffer to ensure all data is written to the file
-    buf_writer.flush()?;
+    // // Flushing the buffer to ensure all data is written to the file
+    // buf_writer.flush()?;
 
-    // Update progress bar after serialization
-    progress_bar.finish_with_message("File saved successfully.");
+    // // Update progress bar after serialization
+    // progress_bar.finish_with_message("File saved successfully.");
 
     Ok(())
 }
