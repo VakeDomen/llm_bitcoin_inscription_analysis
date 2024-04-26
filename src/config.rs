@@ -1,6 +1,6 @@
 pub const INSCRIPTIONS_TO_PROCESS: Option<usize> = None;
 pub const PAR_CHUNK_SIZE: u64 = 2;
-pub const PROGRESS_FILE: &str = "./data/progres.json";
+pub const PROGRESS_FILE: &str = "./data/progress.json";
 
 
 pub const SYSTEM_MSG: &str = "Your task is to help us analyize bitcoin inscriptions. You will tell me a summary of the given text. And then give a list of up to 5 keywords that would describe the inscription and a language field for the language (code) of the inscription. You only respond with JSON.";

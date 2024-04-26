@@ -1,5 +1,5 @@
 
-use std::{cmp::min, fs::{File, OpenOptions}, io::Write, sync::{Arc, Mutex}, vec};
+use std::{cmp::min, fs::{File, OpenOptions}, io::Write, path::Path, sync::{Arc, Mutex}, vec};
 
 use candle_core::{self, Device};
 use csv::Writer;
@@ -88,7 +88,6 @@ fn main() {
     for batch in inscriptions.chunks(progress.par_chunk_size as usize) {
 
         let results: Vec<Result<(String, String), (String, String)>> = batch.par_iter().enumerate().map(|(index, inscription)| {
-            let prompt = Prompt::One(inscription.content.clone());
 
             // Select the appropriate model and device based on the index
             let (mut model, device) = match index % 2 {
@@ -97,7 +96,7 @@ fn main() {
             };
 
             // Process the prompt with the selected model and device
-            match prompt_model(&mut *model, &tokenizer, prompt, device) {
+            match prompt_model(&mut *model, &tokenizer, Prompt::One(inscription.content.clone()), device) {
                 Ok(out) => Ok((inscription.id.clone(), out)),
                 Err(e) => Err((inscription.id.clone(), e.to_string()))
             }
@@ -118,6 +117,7 @@ fn main() {
 
         progress.batches_done += 1;
 
+
         if let Err(e) = save_to_json(&processed, "./data/processed_inscriptions.jsonl") {
             println!("Failed saving records: {:#?}", e)
         };
@@ -129,6 +129,8 @@ fn main() {
             println!("Failed to save progress file.");
         }
 
+        processed = vec![];
+        failed = vec![];
 
         if done >= to_process as u64 {
             break;
@@ -136,9 +138,6 @@ fn main() {
     }
 
     progress_bar.finish_with_message("Processing complete!");
-
-   
-
 }
 
 fn get_progress_bar(len: usize) -> ProgressBar {
@@ -168,15 +167,17 @@ fn save_to_csv(records: Vec<ProcessedInscription>, file_name: &str) -> Result<()
 }
 
 fn save_to_json(records: &Vec<ProcessedInscription>, file_name: &str) -> Result<()> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .append(true)
-        .open(file_name)
-        .unwrap();
-    // let progress_bar = get_progress_bar(records.len());
+    let mut file = if !Path::new(file_name).exists() {
+        File::create(file_name)?
+    } else {
+        OpenOptions::new()
+            .write(true)
+            .append(true)
+            .open(file_name)?
+    };
 
     for record in records {
-        if let Err(e) = writeln!(file, "{:?}", serde_json::to_string(record)) {
+        if let Err(e) = writeln!(file, "{:?}", serde_json::to_string(record).unwrap()) {
             eprintln!("Couldn't write to file: {}", e);
         }
     }
