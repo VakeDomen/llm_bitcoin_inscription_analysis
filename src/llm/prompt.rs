@@ -67,7 +67,9 @@ pub fn prompt_model(
    
     // Parse the prompt to a raw string format.
     let prompt_str = parse_prompt_to_raw(&prompt)?;
-    print!("{}", &prompt_str);
+    if VERBOSE_PROMPT {
+        print!("{}", &prompt_str);
+    }
     
     
     // Tokenize the prompt string for model processing.

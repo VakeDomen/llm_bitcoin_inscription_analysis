@@ -2,8 +2,8 @@ use serde::{Serialize, Deserialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct Inscription {
-    id: String,
-    content: String,
+    pub id: String,
+    pub content: String,
     block_no: i64,
     number: i64,
     timestamp: i64,
